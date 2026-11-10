@@ -406,7 +406,60 @@ const CHARTS = [
 ];
 CHARTS.forEach((c) => { INFO["chart:" + c.id] = { title: c.title, ...c.info }; });
 
-const EXTRAS = []; 
+const EXTRAS = [
+  {
+    id: "xHallazgos", sec: "resumen", span: 6, title: "Hallazgos automáticos", sub: "Lo que más se destaca con los filtros actuales",
+    info: { what: "Frases que resumen lo más relevante de los datos en vista: el mejor día, el transportista líder, el tipo de despacho más común y alertas.", how: "Se recalculan cada vez que cambiás un filtro o llegan datos nuevos. Ninguna está escrita a mano: salen de comparar los totales.", tip: "Clic en un hallazgo para abrir su detalle." },
+    render: (d, el) => {
+      const L = [];
+      const P = d.periodos;
+      if (P.length > 1) {
+        const b = P.reduce((a, x) => x.impSoles > a.impSoles ? x : a, P[0]);
+        L.push({ icon: "fa-trophy", tone: "brand", html: `<b>${esc(b.label)}</b> fue el mes con más despachos: <b>${fmtMoney(b.impSoles)}</b>.`, cond: [{ dim: "mesStr", value: b.key, label: b.label }] });
+      }
+      if (d.transportista.length > 1) {
+        const t = d.transportista[0];
+        L.push({ icon: "fa-truck-fast", tone: "brand", html: `<b>${esc(t.label)}</b> lidera los despachos con el <b>${fmtPct((t.impSoles / (d.k.impSoles || 1)) * 100)}</b> del valor total.`, cond: [{ dim: "transportista", value: t.label }] });
+      }
+      const paradas = d.transportista.filter(t => t.pctEntregado < 90).sort((a, b) => a.pctEntregado - b.pctEntregado);
+      if (paradas.length) {
+        const p = paradas[0];
+        L.push({ icon: "fa-triangle-exclamation", tone: "warn", html: `<b>${esc(p.label)}</b> tiene la efectividad más baja: solo el <b>${fmtPct(p.pctEntregado)}</b> de sus entregas se completaron.`, cond: [{ dim: "transportista", value: p.label }] });
+      }
+      if (d.tipo.length > 1) {
+        const m = d.tipo[0];
+        L.push({ icon: "fa-tags", tone: "brand", html: `El tipo <b>${esc(m.label)}</b> es el más frecuente: <b>${fmtMoney(m.impSoles)}</b>.`, cond: [{ dim: "tipo", value: m.label }] });
+      }
+      if (d.departamento.length > 1) {
+        const dep = d.departamento[0];
+        L.push({ icon: "fa-map-location-dot", tone: "brand", html: `<b>${esc(dep.label)}</b> es el departamento con mayor volumen: <b>${fmtMoney(dep.impSoles)}</b>.`, cond: [{ dim: "departamento", value: dep.label }] });
+      }
+      el._conds = L.map((x) => x.cond || null);
+      el.innerHTML = L.length
+        ? `<ul class="insights">${L.slice(0, 5).map((x, i) => `
+            <li class="insight tone-${x.tone}">
+              ${x.cond ? `<button type="button" class="insight-btn" data-insight="${i}">` : `<div class="insight-btn is-static">`}
+                <span class="insight-ico"><i class="fas ${x.icon}"></i></span>
+                <span class="insight-text">${x.html}</span>
+                ${x.cond ? `<i class="fas fa-chevron-right insight-go" aria-hidden="true"></i></button>` : `</div>`}
+            </li>`).join("")}</ul>`
+        : `<p class="table-empty">No hay suficientes datos en vista.</p>`;
+    }
+  },
+  {
+    id: "tDetalle", sec: "resumen", span: 6, title: "Detalle principal", sub: "Primeras filas · clic en una fila para ver el detalle",
+    info: { what: "La tabla de detalle principal: H/R, fecha, tipo, transportista y estado.", how: "Se muestran las primeras 100 filas ordenables de lo que está en vista." },
+    table: (d) => {
+      const rows = state.vista.slice(0, 100);
+      return {
+        head: [{ t: "H/R" }, { t: "Fecha" }, { t: "Tipo" }, { t: "Transportista" }, { t: "Estado" }, { t: "Importe", num: 1 }],
+        rows: rows.map((r) => [r.hr, r.fechaStr, r.tipo, r.transportista, r.estado, cell(r.impSoles, fmtMoney)]),
+        conds: rows.map((r) => [{ dim: "tipo", value: r.tipo }])
+      };
+    },
+  },
+];
+EXTRAS.forEach((x) => { INFO["extra:" + x.id] = { title: x.title, ...x.info }; });
 const KPIS = [
   { id: "impSoles", label: "Importe Despachado", icon: "fa-sack-dollar", slot: 0, f: fmtMoney, info: { what: "El valor total (en S/) de la mercadería enviada.", how: "Suma de Importe moneda soles." } },
   { id: "hr", label: "Hojas de Ruta", icon: "fa-file-invoice", slot: 2, f: fmt, info: { what: "Cantidad de viajes/despachos únicos generados.", how: "Conteo de H/R distintas en la vista." } },
@@ -428,15 +481,18 @@ function construirLayout() {
     </article>`).join("");
 
   const orden = {
-    resumen: ["cEvolucion", "cTipoDona", "cEstadoBar", "cPesoVolumen"],
+    resumen: ["cEvolucion", "cTipoDona", "cEstadoBar", "cPesoVolumen", "xHallazgos", "tDetalle"],
     despachos: ["cDivVenta", "cCapacidad", "cArticulos", "tResumenTipo", "tResumenDivision"],
     destinos: ["cDeptoBar", "cAlmacenDestino", "tGeografico"],
     transportistas: ["cTranspBar", "cEfectividadTransp", "cCicloTransp", "tExcepciones"]
   };
+  
   SEC_KEYS.forEach((sec) => {
     $("grid-" + sec).innerHTML = orden[sec].map((id) => {
       const c = CHARTS.find((x) => x.id === id);
-      return c ? chartCard(c) : "";
+      if (c) return chartCard(c);
+      const x = EXTRAS.find((e) => e.id === id);
+      return x ? extraCard(x) : "";
     }).join("");
   });
 }
@@ -463,32 +519,50 @@ function chartCard(c) {
   </article>`;
 }
 
+function extraCard(x) {
+  return `
+  <article class="card extra-card span-${x.span}" id="card-${x.id}" data-extra="${x.id}">
+    <header class="card-head">
+      <div class="card-titles"><h3>${x.title}</h3><p>${x.sub}</p></div>
+      <div class="card-actions">${infoBtn("extra:" + x.id, x.title)}</div>
+    </header>
+    <div class="card-body" id="${x.id}">
+      <div class="sk sk-block"></div>
+    </div>
+  </article>`;
+}
+
 function wire(spec, out, config) {
   config.options = config.options || {};
   config.options.onClick = (evt, els) => { const e = els[0]; if (!e || !out.drill) return; const cond = out.drill(e); if (cond) abrirDrill(cond.filter(Boolean)); };
   return config;
 }
 function mountChart(spec, { force = false } = {}) {
-  if (!spec.build) {
-    // Es una tabla directa
-    const card = $("card-" + spec.id);
-    if (card) {
-      const out = spec.table(state.d);
-      renderTabla(card.querySelector(".table-view"), "tv-" + spec.id, out);
+  const card = $("card-" + spec.id); 
+  if (!card) return;
+
+  const out = spec.build ? spec.build(state.d, state.tk) : { table: spec.table(state.d) };
+  outs[spec.id] = out;
+  
+  // Si es un gráfico, actualizamos el canvas
+  if (spec.build) {
+    card.classList.toggle("is-empty", !!out.empty); 
+    card.querySelector(".empty-card").hidden = !out.empty;
+    const canvas = $(spec.id);
+    if (canvas && out.config) {
+      const config = wire(spec, out, out.config); 
+      const prev = charts[spec.id];
+      if (prev) { prev.destroy(); delete charts[spec.id]; }
+      charts[spec.id] = new Chart(canvas, config);
     }
-    return;
+    const leg = card.querySelector(`[data-legend="${spec.id}"]`);
+    if (leg && out.legend) leg.innerHTML = out.legend.map((l) => `<li><button type="button" class="dl-item"><span class="dl-dot" style="background:${l.color}"></span><span class="dl-label">${esc(l.label)}</span><span class="dl-val">${l.value}</span><span class="dl-pct">${fmt(l.pct, 1)} %</span></button></li>`).join("");
   }
 
-  const canvas = $(spec.id); if (!canvas) return;
-  const card = $("card-" + spec.id); const out = spec.build(state.d, state.tk); outs[spec.id] = out;
-  card.classList.toggle("is-empty", !!out.empty); card.querySelector(".empty-card").hidden = !out.empty;
-  renderTabla(card.querySelector(`[data-tableview="${spec.id}"]`), "tv-" + spec.id, out.table);
-  const leg = card.querySelector(`[data-legend="${spec.id}"]`);
-  if (leg && out.legend) leg.innerHTML = out.legend.map((l) => `<li><button type="button" class="dl-item"><span class="dl-dot" style="background:${l.color}"></span><span class="dl-label">${esc(l.label)}</span><span class="dl-val">${l.value}</span><span class="dl-pct">${fmt(l.pct, 1)} %</span></button></li>`).join("");
-  if (out.empty) { if (charts[spec.id]) { charts[spec.id].destroy(); delete charts[spec.id]; } return; }
-  const config = wire(spec, out, out.config); const prev = charts[spec.id];
-  if (prev) { prev.destroy(); delete charts[spec.id]; }
-  charts[spec.id] = new Chart(canvas, config);
+  // Renderizamos su tabla interna (si es que tiene)
+  if (out.table) {
+    renderTabla(card.querySelector(`[data-tableview="${spec.id}"]`), "tv-" + spec.id, out.table);
+  }
 }
 
 function renderTabla(container, id, def) {
@@ -596,8 +670,25 @@ function renderSeccion(sec, { force = false } = {}) {
   SEC_KEYS.forEach((k) => { const el = $("sec-" + k); const on = k === sec; if (on && el.hidden) { el.classList.remove("enter"); void el.offsetWidth; el.classList.add("enter"); } el.hidden = !on; });
   document.querySelectorAll("#dashTabs .tab").forEach((t) => { const on = t.dataset.seccion === sec; t.classList.toggle("active", on); t.setAttribute("aria-selected", on ? "true" : "false"); });
   if (!state.payload) return;
+  
   if (sec === "resumen") renderKPIs();
+  
+  // Renderiza gráficos Y tablas (CHARTS)
   CHARTS.filter((c) => c.sec === sec).forEach((c) => mountChart(c, { force }));
+  
+  // Renderiza EXTRAS (Hallazgos y Detalle)
+  EXTRAS.filter((x) => x.sec === sec).forEach((x) => {
+    const card = document.getElementById("card-" + x.id);
+    if (!card) return;
+    const body = card.querySelector(".card-body");
+    
+    // Si es Hallazgos (render), si es Tabla (table)
+    if (x.render) {
+      x.render(state.d, body);
+    } else if (x.table) {
+      renderTabla(body, "tv-" + x.id, x.table(state.d));
+    }
+  });
 }
 function cambiarSeccion(sec) { if (!SECCIONES[sec]) sec = "resumen"; const cambio = sec !== state.seccion; state.seccion = sec; cerrarPopover(); renderContexto(); writeHash(); renderSeccion(sec, { force: cambio }); if (cambio) window.scrollTo({ top: 0, behavior: REDUCED ? "auto" : "smooth" }); }
 
